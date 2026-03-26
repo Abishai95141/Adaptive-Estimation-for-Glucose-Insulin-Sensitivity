@@ -7,7 +7,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python">
-  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
+  <img src="https://img.shields.io/badge/License-Apache_2.0-green.svg" alt="License">
   <img src="https://img.shields.io/badge/Patients-50-orange.svg" alt="Patients">
   <img src="https://img.shields.io/badge/MAE_Reduction-47.5%25-brightgreen.svg" alt="MAE Reduction">
 </p>
@@ -618,7 +618,7 @@ causal_eval/tests/
 
 ## License
 
-MIT License
+Apache License 2.0
 
 ---
 
