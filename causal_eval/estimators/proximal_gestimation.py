@@ -29,7 +29,7 @@ Structural equations in our DGP:
 KEY INSIGHT — Control Function Approach (Wooldridge 2015):
 After partialling out S (Robinson 1988), the residualized system is:
     Ã = -α·Ũ + noise_A
-    Ỹ = τ·Ã + γ·Ũ + ε
+     Ỹ = τ·Ã + γ·Ũ + ε
 
 The proxies (Z̃, W̃) correlate with Ũ but are excluded from the outcome
 equation. The control function approach:
@@ -355,11 +355,12 @@ class ProximalGEstimatorWrapper:
 
         return tau_individual
 
-    def save_diagnostics(self, filepath):
+    def save_diagnostics(self, filepath, ground_truth=None):
         """
         Save per-patient diagnostics to CSV.
 
         Records per-patient:
+          - tau_true: ground truth treatment effect (if provided)
           - tau_cf: raw control function estimate before relevance weighting
           - tau_naive: naive per-patient estimate
           - relevance_weight: F-stat-based blend weight
@@ -369,15 +370,20 @@ class ProximalGEstimatorWrapper:
         rather than hidden.
         """
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        fieldnames = ['patient_id', 'tau_cf', 'tau_naive', 'relevance_weight',
-                       'tau_final', 'r2_stage1', 'F_stat_stage1']
+        fieldnames = ['patient_id', 'tau_true', 'tau_cf', 'tau_naive',
+                       'relevance_weight', 'tau_final', 'r2_stage1',
+                       'F_stat_stage1']
         with open(filepath, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for pid in sorted(self._individual_diagnostics.keys()):
                 diag = self._individual_diagnostics[pid]
+                tau_true_val = float('nan')
+                if ground_truth is not None and pid in ground_truth:
+                    tau_true_val = ground_truth[pid]
                 writer.writerow({
                     'patient_id': pid,
+                    'tau_true': tau_true_val,
                     'tau_cf': diag.get('tau_cf', float('nan')),
                     'tau_naive': diag.get('tau_naive', float('nan')),
                     'relevance_weight': diag.get('relevance_weight', float('nan')),

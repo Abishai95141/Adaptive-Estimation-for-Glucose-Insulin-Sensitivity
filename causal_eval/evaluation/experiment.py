@@ -412,7 +412,7 @@ class CausalExperiment:
                         RESULTS_DIR,
                         f'proximal_diagnostics_{proxy_condition}.csv'
                     )
-                    estimator.save_diagnostics(diag_path)
+                    estimator.save_diagnostics(diag_path, ground_truth=self.ground_truth)
                     print(f"    Diagnostics saved to {diag_path}")
 
         table_str, rows = format_results_table(all_results)

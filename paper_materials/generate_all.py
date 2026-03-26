@@ -5,7 +5,9 @@ Generate all paper materials from the 50-patient experiment.
 Produces:
   1. LaTeX tables (Table 1: main results, Table 2: diagnostics summary)
   2. Figures (Fig 1: MAE bar chart, Fig 2: per-patient tau scatter,
-             Fig 3: F-stat vs relevance weight, Fig 4: strong vs weak proxy)
+             Fig 3: F-stat vs relevance weight, Fig 4: strong vs weak proxy,
+             Fig 5: bias reduction histogram,
+             Fig 6: τ̂_proximal vs τ_true ground truth recovery)
   3. Summary statistics text file
   4. Per-patient analysis CSV
 
@@ -591,6 +593,89 @@ def fig5_bias_reduction_histogram(diag_strong, output_path):
     print(f"  Figure 5 → {output_path}")
 
 
+def fig6_ground_truth_recovery(diag_strong, diag_weak, output_path):
+    """Figure 6: τ̂_proximal vs τ_true — ground truth recovery scatter.
+
+    Plots the proximal G-estimation estimate (τ̂_final) against the
+    Hovorka-derived ground truth (τ_true) for each patient, with the
+    45° identity line as perfect recovery. Both strong and weak proxy
+    conditions are shown.
+
+    Requires that the diagnostics CSV contains the 'tau_true' column
+    (added by passing ground_truth to save_diagnostics).
+    """
+    # Check that tau_true is available in the diagnostics
+    if 'tau_true' not in diag_strong[0]:
+        print("  Figure 6 — SKIPPED (tau_true not in diagnostics CSV; re-run experiment)")
+        return
+
+    tau_true_s = np.array([d['tau_true'] for d in diag_strong])
+    tau_final_s = np.array([d['tau_final'] for d in diag_strong])
+    tau_true_w = np.array([d['tau_true'] for d in diag_weak])
+    tau_final_w = np.array([d['tau_final'] for d in diag_weak])
+
+    # Skip if tau_true is all NaN (old CSV without ground truth)
+    if np.all(np.isnan(tau_true_s)):
+        print("  Figure 6 — SKIPPED (tau_true is NaN; re-run experiment)")
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6), sharey=True)
+
+    for ax, tau_true, tau_hat, label, color in [
+        (axes[0], tau_true_s, tau_final_s, 'Strong proxies (β=0.8, σ=0.2)', '#009e73'),
+        (axes[1], tau_true_w, tau_final_w, 'Weak proxies (β=0.3, σ=0.5)', '#d55e00'),
+    ]:
+        ax.scatter(tau_true, tau_hat, c=color, alpha=0.75, s=55,
+                   edgecolors='black', linewidth=0.5, zorder=3)
+
+        # 45° identity line (perfect recovery)
+        all_vals = np.concatenate([tau_true, tau_hat])
+        pad = 0.05 * (all_vals.max() - all_vals.min())
+        lo = all_vals.min() - pad
+        hi = all_vals.max() + pad
+        ax.plot([lo, hi], [lo, hi], 'k--', alpha=0.5, linewidth=1.5,
+                label='Perfect recovery (τ̂ = τ)')
+
+        # Linear fit
+        mask = np.isfinite(tau_true) & np.isfinite(tau_hat)
+        if mask.sum() > 2:
+            slope, intercept = np.polyfit(tau_true[mask], tau_hat[mask], 1)
+            x_fit = np.linspace(lo, hi, 100)
+            ax.plot(x_fit, slope * x_fit + intercept, color=color,
+                    linewidth=2, alpha=0.7,
+                    label=f'OLS fit (slope={slope:.2f})')
+
+            # Correlation
+            corr = np.corrcoef(tau_true[mask], tau_hat[mask])[0, 1]
+            mae = np.mean(np.abs(tau_hat[mask] - tau_true[mask]))
+            ax.text(0.05, 0.92,
+                    f'r = {corr:.3f}\nMAE = {mae:.2f} mg/dL/U',
+                    transform=ax.transAxes, fontsize=10,
+                    verticalalignment='top',
+                    bbox=dict(boxstyle='round,pad=0.4', facecolor='white',
+                              alpha=0.8, edgecolor='grey'))
+
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ax.set_xlabel('τ_true (Hovorka ground truth, mg/dL/U)', fontsize=11)
+        ax.set_title(label, fontsize=12)
+        ax.legend(fontsize=9, loc='lower right')
+        ax.set_aspect('equal')
+        ax.grid(alpha=0.2)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+    axes[0].set_ylabel('τ̂_proximal (estimated, mg/dL/U)', fontsize=11)
+
+    fig.suptitle('Figure 6: Ground Truth Recovery — τ̂_proximal vs τ_true\n'
+                 '(50 patients, per-patient proximal G-estimation)',
+                 fontsize=13, y=1.02)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  Figure 6 → {output_path}")
+
+
 # ===================================================================
 # 7. Run everything
 # ===================================================================
@@ -621,6 +706,7 @@ def main():
         fig3_fstat_relevance(diag_strong, diag_weak, os.path.join(OUTPUT_DIR, 'fig3_fstat_relevance.png'))
         fig4_strong_vs_weak(diag_strong, diag_weak, os.path.join(OUTPUT_DIR, 'fig4_strong_vs_weak.png'))
         fig5_bias_reduction_histogram(diag_strong, os.path.join(OUTPUT_DIR, 'fig5_bias_reduction.png'))
+        fig6_ground_truth_recovery(diag_strong, diag_weak, os.path.join(OUTPUT_DIR, 'fig6_ground_truth_recovery.png'))
     else:
         print("\nSkipping figures (matplotlib not available)")
 
