@@ -50,44 +50,60 @@ AEGIS is a semi-synthetic causal evaluation framework that demonstrates **proxim
 
 The system has four sequential stages:
 
-```
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│  ① Data          │    │  ② Semi-Synthetic │    │  ③ Estimation    │    │  ④ Evaluation    │
-│  Generation      │───▶│  DGP             │───▶│                  │───▶│                  │
-│                  │    │                  │    │  • Naive OLS     │    │  • MAE, Bias     │
-│  • Hovorka ODE   │    │  Y = μ(S) +      │    │  • Pop. AIPW    │    │  • P95 Error     │
-│  • Confounders   │    │    τ·A + γ·U + ε  │    │  • Std G-est    │    │  • Coverage      │
-│  • Proxies (Z,W) │    │  A = f(S) - α·U  │    │  • Proximal     │    │  • Diagnostics   │
-│  • Ground Truth  │    │    + noise        │    │    G-est ★      │    │                  │
-└──────────────────┘    └──────────────────┘    └──────────────────┘    └──────────────────┘
+```mermaid
+flowchart LR
+    subgraph Stage1["① Data Generation"]
+        A["Hovorka ODE\nSimulator"] --> B["Confounder\nInjection"]
+        B --> C["Proxy\nGeneration"]
+        A --> D["Ground Truth\nComputation"]
+    end
+
+    subgraph Stage2["② Semi-Synthetic DGP"]
+        E["Structural\nEquations"]
+    end
+
+    subgraph Stage3["③ Estimation"]
+        F["Naive OLS"]
+        G["Population AIPW"]
+        H["Standard G-est"]
+        I["Proximal G-est\n+ Bridge Function"]
+    end
+
+    subgraph Stage4["④ Evaluation"]
+        J["Metrics\n(MAE, Coverage)"]
+        K["Diagnostics\nCSV Export"]
+    end
+
+    Stage1 --> Stage2 --> Stage3 --> Stage4
 ```
 
 ### Causal DAG
 
-```
-                    ┌─────────────────────┐
-                    │  U (Stress/Fatigue)  │  ← Latent, HIDDEN from estimators
-                    │  Unmeasured          │
-                    │  Confounder          │
-                    └──┬──────────────┬────┘
-                       │              │
-              −α (reduces      +γ (cortisol
-              adherence)       raises BG)
-                       │              │
-                       ▼              ▼
-   ┌────────┐    ┌──────────┐    ┌──────────┐
-   │ S      │───▶│ A        │───▶│ Y        │
-   │ (Obs.  │    │ (Insulin │ τ_i│ (Glucose │
-   │ Covs)  │    │  Dose)   │    │  Change) │
-   └────────┘    └──────────┘    └──────────┘
-                       ▲              ▲
-                   ╎               ╎
-              ┌────┴───┐     ┌────┴───┐
-              │ Z      │     │ W      │
-              │ Proxy  │     │ Proxy  │
-              │ (from  │     │ (from  │
-              │ stress)│     │fatigue)│
-              └────────┘     └────────┘
+This is the core causal structure. Estimators see only the **observable nodes** — the latent confounder U is hidden.
+
+```mermaid
+flowchart TD
+    U["U (Stress)\nLatent Confounder\n— HIDDEN —"]
+    S["S (Glucose, Carbs, Hour)\nObserved Covariates"]
+    A["A (Insulin Dose)\nContinuous Treatment"]
+    Y["Y (Glucose Change)\nOutcome"]
+    Z["Z (Treatment Proxy)\nβ·stress + ε_Z"]
+    W["W (Outcome Proxy)\nβ·fatigue + ε_W"]
+
+    U -- "-α (reduces adherence)" --> A
+    U -- "+γ (cortisol raises BG)" --> Y
+    S --> A
+    S --> Y
+    A -- "τ_i (causal effect)" --> Y
+    U -.-> Z
+    U -.-> W
+
+    style U fill:#ff6b6b,color:#fff
+    style S fill:#4ecdc4,color:#fff
+    style A fill:#45b7d1,color:#fff
+    style Y fill:#45b7d1,color:#fff
+    style Z fill:#ffa07a,color:#fff
+    style W fill:#ffa07a,color:#fff
 ```
 
 **Proxy Independence Conditions** (structurally enforced in code):
@@ -96,52 +112,219 @@ The system has four sequential stages:
 
 ### Module Dependency Map
 
+```mermaid
+flowchart TB
+    subgraph DGP["causal_eval/dgp/"]
+        HW["hovorka_wrapper.py\n─────────────────\nHovorkaWrapper\ncreate_cohort()\nmicro_randomize()"]
+        CI["confounder_injection.py\n──────────────────────\nConfounderInjector\nAR(1) stress/fatigue/exercise"]
+        PG["proxy_generator.py\n───────────────────\nProxyGenerator\ncreate_proxy_generator()"]
+        GT["ground_truth.py\n────────────────\nGroundTruthComputer\nFinite-difference τ_i"]
+    end
+
+    subgraph EST["causal_eval/estimators/"]
+        NR["naive_regression.py\n──────────────────\nNaiveOLSEstimator"]
+        PA["population_aipw.py\n─────────────────\nPopulationAIPWEstimator"]
+        SG["standard_gestimation.py\n──────────────────────\nStandardGEstimator"]
+        PX["proximal_gestimation.py\n──────────────────────\nProximalGEstimatorWrapper\nProximalConfidenceSequence"]
+    end
+
+    subgraph EVAL["causal_eval/evaluation/"]
+        EX["experiment.py\n──────────────\nCausalExperiment\nrun_experiment()"]
+        MT["metrics.py\n────────────\ncompute_metrics()\nsave_results_csv()"]
+    end
+
+    subgraph EXT["verification/simulator/"]
+        SIM["patient.py\n──────────────\nHovorkaPatientSimulator\n(11-state ODE)"]
+    end
+
+    SIM --> HW
+    HW --> GT
+    HW --> EX
+    CI --> EX
+    PG --> EX
+    GT --> EX
+    NR --> EX
+    PA --> EX
+    SG --> EX
+    PX --> EX
+    MT --> EX
 ```
-verification/simulator/
-└── patient.py (HovorkaPatientSimulator — 11-state ODE)
-         │
-         ▼
-causal_eval/dgp/
-├── hovorka_wrapper.py ──▶ HovorkaWrapper, create_cohort(), micro_randomize()
-├── confounder_injection.py ──▶ ConfounderInjector (AR(1) stress/fatigue/exercise)
-├── proxy_generator.py ──▶ ProxyGenerator, create_proxy_generator()
-└── ground_truth.py ──▶ GroundTruthComputer (finite-difference τ_i)
-         │
-         ▼
-causal_eval/estimators/
-├── _utils.py ──▶ partial_out(), stable_ols_coef()
-├── naive_regression.py ──▶ NaiveOLSEstimator
-├── population_aipw.py ──▶ PopulationAIPWEstimator
-├── standard_gestimation.py ──▶ StandardGEstimator
-└── proximal_gestimation.py ──▶ ProximalGEstimatorWrapper + ProximalConfidenceSequence
-         │
-         ▼
-causal_eval/evaluation/
-├── experiment.py ──▶ CausalExperiment (orchestrator)
-└── metrics.py ──▶ compute_metrics(), save_results_csv()
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class HovorkaPatientSimulator {
+        +state: ndarray
+        +params: dict
+        +sim_step(insulin, carbs)
+        +_rk4_step(state, insulin, carbs, dt)
+    }
+
+    class HovorkaWrapper {
+        +patient_id: int
+        +patient_type: str
+        +save_state() dict
+        +restore_state(snapshot)
+        +generate_trajectory(n_steps) dict
+    }
+
+    class ConfounderInjector {
+        +stress: float
+        +fatigue: float
+        +exercise: float
+        +step(hour, exercise_event) dict
+        +get_treatment_probability_modifier() float
+    }
+
+    class ProxyGenerator {
+        +beta: float
+        +sigma: float
+        +generate(stress, fatigue) tuple
+    }
+
+    class GroundTruthComputer {
+        +delta: float
+        +horizon_steps: int
+        +compute_tau_at_time(wrapper) float
+        +compute_cohort_tau(cohort) tuple
+    }
+
+    class NaiveOLSEstimator {
+        +estimate(Y, A, S) dict
+        +estimate_individual(Y, A, S, ids) dict
+    }
+
+    class PopulationAIPWEstimator {
+        +estimate(Y, A, S) dict
+        +estimate_individual(Y, A, S, ids) dict
+    }
+
+    class StandardGEstimator {
+        +estimate(Y, A, S) dict
+        +estimate_individual(Y, A, S, ids) dict
+    }
+
+    class ProximalGEstimatorWrapper {
+        +bridge_type: str
+        +estimate(Y, A, S, Z, W) dict
+        +estimate_individual(Y, A, S, ids, Z, W) dict
+        +save_diagnostics(filepath)
+    }
+
+    class ProximalConfidenceSequence {
+        +alpha: float
+        +sensitivity_gamma: float
+        +update(observation, se) tuple
+        +set_from_scores(tau_hat, dr_scores) tuple
+        +get_coverage(true_value) bool
+    }
+
+    class CausalExperiment {
+        +n_patients: int
+        +cohort: list
+        +ground_truth: dict
+        +setup()
+        +generate_data()
+        +run()
+    }
+
+    HovorkaWrapper --> HovorkaPatientSimulator : wraps
+    GroundTruthComputer --> HovorkaWrapper : uses
+    CausalExperiment --> HovorkaWrapper : creates cohort
+    CausalExperiment --> ConfounderInjector : generates U
+    CausalExperiment --> ProxyGenerator : generates Z, W
+    CausalExperiment --> GroundTruthComputer : computes τ_true
+    CausalExperiment --> NaiveOLSEstimator : runs
+    CausalExperiment --> PopulationAIPWEstimator : runs
+    CausalExperiment --> StandardGEstimator : runs
+    CausalExperiment --> ProximalGEstimatorWrapper : runs
+    ProximalGEstimatorWrapper --> ProximalConfidenceSequence : creates
+```
+
+### Data Flow (End-to-End Pipeline)
+
+```mermaid
+sequenceDiagram
+    participant EX as CausalExperiment
+    participant HW as HovorkaWrapper
+    participant GT as GroundTruthComputer
+    participant CI as ConfounderInjector
+    participant PG as ProxyGenerator
+    participant EST as Estimators (×4)
+    participant MET as Metrics
+
+    Note over EX: Phase 1 — Setup
+    EX->>HW: create_cohort(50 patients)
+    HW-->>EX: [child×15, adolescent×15, adult×20]
+    EX->>GT: compute_cohort_tau(cohort)
+    GT->>HW: save_state() / restore_state()
+    GT-->>EX: τ_true[i] for each patient
+
+    Note over EX: Phase 2 — Data Generation
+    loop For each patient i
+        EX->>CI: step(hour) → U_t (stress, fatigue)
+        EX->>EX: A_t = A_base(S) − α·U + noise
+        EX->>EX: Y_t = μ(S) + τ_i·A_t + γ·U + ε
+    end
+
+    Note over EX: Phase 3 — Proxy Generation
+    loop For each proxy condition [strong, weak]
+        EX->>PG: generate(stress, fatigue)
+        PG-->>EX: Z (from stress), W (from fatigue)
+    end
+
+    Note over EX: Phase 4 — Estimation
+    loop For each estimator × proxy condition
+        EX->>EST: estimate_individual(Y, A, S, Z, W, ids)
+        EST-->>EX: τ̂[i] per patient
+    end
+
+    Note over EX: Phase 5 — Evaluation
+    EX->>MET: compute_metrics(τ_true, τ̂)
+    MET-->>EX: MAE, bias, P95, coverage
 ```
 
 ### Proximal G-Estimation Internal Pipeline
 
+```mermaid
+flowchart TD
+    A["Raw Data: Y, A, S, Z, W\n(per patient, 288 obs)"]
+    B["Robinson Partialling-Out\nỸ, Ã, Z̃, W̃ = residuals after S"]
+    C["Stage 1: Ã ~ (1, Z̃, W̃)\n→ Â (predicted), V = Ã − Â"]
+    D["First-Stage Diagnostics\nR², F-stat"]
+    E{"F ≥ 10?"}
+    F["Stage 2: Ỹ ~ (1, Ã, Z̃, W̃, V)\nτ_cf = coeff on Ã"]
+    G["Relevance Weight\nw = 1 − exp(−F/10)"]
+    H["Blended Estimate\nτ̂ = w·τ_cf + (1−w)·τ_naive"]
+    I["Sandwich SE\n+ inflation by 1/w"]
+    J["DR Influence Scores\nψ_i for Confidence Sequences"]
+
+    A --> B --> C --> D --> E
+    C --> F
+    E -- "Strong proxies" --> G
+    E -- "Weak proxies" --> G
+    F --> G --> H
+    H --> I --> J
+
+    style E fill:#ffcc02,color:#000
+    style H fill:#2ecc71,color:#fff
 ```
-Raw Data (Y, A, S, Z, W) per patient (288 obs)
-    │
-    ▼
-Robinson Partialling-Out → Ỹ, Ã, Z̃, W̃
-    │
-    ├──▶ Stage 1: Ã ~ (1, Z̃, W̃) → Â, V = Ã − Â
-    │         │
-    │         ├── R², F-statistic diagnostics
-    │         └── Relevance weight: w = 1 − exp(−F/10)
-    │
-    ├──▶ Stage 2: Ỹ ~ (1, Ã, Z̃, W̃, V) → τ_cf = coeff on Ã
-    │
-    ▼
-Blended Estimate: τ̂ = w·τ_cf + (1−w)·τ_naive
-    │
-    ├── Sandwich SE (inflated by 1/w for weak proxies)
-    └── DR Influence Scores → Confidence Sequences
-```
+
+### Key Design Parameters
+
+| Parameter | Value | Source File | Justification |
+|-----------|-------|-------------|---------------|
+| N patients | 50 | `experiment.py` | 15 child + 15 adolescent + 20 adult |
+| N obs/patient | 288 | `hovorka_wrapper.py` | 24h × 12 steps/hr (5-min intervals) |
+| δ (finite diff) | 0.01 U | `ground_truth.py` | Linear regime of Hovorka ODE |
+| Horizon k | 12 steps (60 min) | `ground_truth.py` | Matches insulin tmaxI ≈ 55 min |
+| γ (U→Y) | 15.0 | `experiment.py` | Creates bias range [0, 15] mg/dL |
+| α (U→A) | 1.5 | `experiment.py` | corr(U,A) ≈ 0.4–0.6 |
+| F threshold | 10.0 | `proximal_gestimation.py` | Stock & Yogo (2005) weak IV |
+| γ_sensitivity | 0.15 | `proximal_gestimation.py` | Calibrated for ~95% cohort coverage |
+| Strong proxy | β=0.8, σ=0.2 | `proxy_generator.py` | SNR = 4.0 |
+| Weak proxy | β=0.3, σ=0.5 | `proxy_generator.py` | SNR = 0.6 |
 
 ---
 
@@ -187,10 +370,7 @@ robust_validation/
 │   ├── fig5_bias_reduction.png
 │   └── fig6_proxy_quality.png
 │
-├── system_design.md             # Detailed system design document
-├── causal_audit.md              # Forensic audit of causal claims
-├── causal_diagnostic_research.md # Diagnostic research notes
-└── PAPER_CLAIMS.md              # Pre-registered claims with evidence
+└── README.md                    # This file
 ```
 
 ---
